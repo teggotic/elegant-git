@@ -9,47 +9,46 @@ on:
 permissions:
   contents: read
 
+env:
+  GHC_VERSION: 9.2.4
+  STACK_VERSION: 2.7.3
+  HLINT_VERSION: 3.3.6
+
 jobs:
   build:
-    runs-on: ubuntu-latest
-
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
     - uses: actions/checkout@v3
-    - uses: haskell/actions/setup@v2
-      with:
-        ghc-version: '9.2.4'
-        enable-stack: true
-        stack-version: '2.7.3'
-    - name: Cache
+    - name: Cache ghcup
       uses: actions/cache@v3
-      env:
-        cache-name: cache-ghcup
       with:
         path: ~/.ghcup
-        key: ${{ runner.os }}-build-${{ env.cache-name }}
-    - name: Install hlint
-      run:
-        wget -O /tmp/hlint-3.3.6.tar.gz https://github.com/ndmitchell/hlint/releases/download/v3.3.6/hlint-3.3.6-x86_64-linux.tar.gz
-    - name: Extract tgz
-      uses: ihiroky/extract-action@v1
-      with:
-        file_path: /tmp/hlint-3.3.6.tar.gz
-        extract_dir: /tmp
-    - name: Install hlint
-      run:
-        cp /tmp/hlint-3.3.6/hlint ~/.ghcup/bin/hlint
-    - name: Cache
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-stack
+        key: ${{ runner.os }}-ghcup-global-${{ env.GHC_VERSION }}-${{ env.STACK_VERSION }}
+        restore-keys: |
+          ${{ runner.os }}-stack-global-
+    - uses: actions/cache@v3
+      name: Cache .stack
       with:
         path: ~/.stack
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('stack.yaml') }}-${{ hashFiles('package.yaml', 'elegant-git.cabal', 'stack.yaml.lock') }}
+        key: ${{ runner.os }}-stack-global-${{ hashFiles('stack.yaml') }}-${{ hashFiles('package.yaml') }}-${{ hashFiles('**/*.hs') }}
         restore-keys: |
-          ${{ runner.os }}-build-${{ env.cache-name }}-
-          ${{ runner.os }}-build-
-          ${{ runner.os }}-
+          ${{ runner.os }}-stack-global-
+    - uses: haskell/actions/setup@v2
+      with:
+        ghc-version: '${{ env.GHC_VERSION }}'
+        enable-stack: true
+        stack-version: '${{ env.STACK_VERSION }}'
+    - name: Install hlint
+      if: ${{ matrix.os == 'ubuntu-latest' }}
+      run: |
+        wget -O /tmp/hlint-${{ env.HLINT_VERSION }}.tar.gz https://github.com/ndmitchell/hlint/releases/download/v${{ env.HLINT_VERSION }}/hlint-${{ env.HLINT_VERSION }}-x86_64-linux.tar.gz
+        tar -xf /tmp/hlint-${{ env.HLINT_VERSION }}.tar.gz -C /tmp
+        cp /tmp/hlint-${{ env.HLINT_VERSION }}/hlint ~/.ghcup/bin/hlint
     - name: Run hlint
+      if: ${{ matrix.os == 'ubuntu-latest' }}
       run: hlint .
     - name: Build dependencies
       run: stack build --no-haddock --only-dependencies --fast --pedantic
