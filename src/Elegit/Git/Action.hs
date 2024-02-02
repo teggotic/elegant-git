@@ -42,7 +42,7 @@ class RenderGitCommand c where
   toolName :: c -> Text
   toolName _ = "git"
 
-renderGC :: RenderGitCommand c => c -> Text
+renderGC :: (RenderGitCommand c) => c -> Text
 renderGC c = toolName c |+ " " +| renderedArgs |+ ""
  where
   renderedArgs = T.intercalate " " (commandArgs c)
@@ -57,7 +57,7 @@ newtype GBranchUpstreamData = GBranchUpstreamData {branch :: Text}
 
 instance RenderGitCommand GBranchUpstreamData where
   commandArgs (GBranchUpstreamData branchName) =
-    ["rev-parse", "--abbrev-ref", branchName, "@{upstream}"]
+    ["rev-parse", "--abbrev-ref", fmt "" +| branchName |+ "@{upstream}"]
 
 data GLogData = GLogData
   { logType :: LogType
@@ -66,7 +66,7 @@ data GLogData = GLogData
   }
 instance RenderGitCommand GLogData where
   commandArgs (GLogData lType baseName targetName) =
-    ["log ", logArg, "" +| baseName |+ ".." +| targetName |+ ""]
+    ["log", logArg, "" +| baseName |+ ".." +| targetName |+ ""]
    where
     logArg :: Text
     logArg = case lType of
@@ -162,6 +162,13 @@ instance RenderGitCommand GGPGKeyListData where
   commandArgs (GGPGKeyListData gEmail) =
     ["--list-secret-keys", "--keyid-format", "long", gEmail]
 
+newtype GCloneRepositoryData = GCloneRepositoryData
+  { opts :: NonEmpty Text
+  }
+
+instance RenderGitCommand GCloneRepositoryData where
+  commandArgs (GCloneRepositoryData opts') = ["clone"] <> toList opts'
+
 data GInitRepositoryData
   = GInitRepositoryData
 
@@ -195,6 +202,10 @@ instance RenderGitCommand GShowData where
 data GitF a
   = InitRepository GInitRepositoryData a
   | AddInitialCommit GInitialCommitData a
+  | CloneRepository GCloneRepositoryData (Maybe () -> a)
+  | AppendToCWD Text a
+  | PopFromCWD a
+  | DirectoryExists Text (Bool -> a)
   | CurrentBranch GCurrentBranchData (Maybe Text -> a)
   | BranchUpstream GBranchUpstreamData (Maybe Text -> a)
   | Show GShowData ([Text] -> a)
@@ -209,8 +220,10 @@ data GitF a
   | PathToTool GPathToToolData (Maybe Text -> a)
   | Prompt PromptConfig (Text -> a)
   | FormatInfo Text (Text -> a)
+  | FormatTextRed Text (Text -> a)
   | FormatCommand Text (Text -> a)
   | PrintText Text a
+  | PrintTextLn Text a
   deriving stock (Functor)
 
 -- | Represents types of git status output
@@ -260,96 +273,114 @@ data PromptConfig = PromptConfig
 -- * When our function has a continuation of type @(() -> a)@, you simply pass @()@ as the
 --   value.
 -- * Otherwise just use `id` function.
-status :: MonadFree GitF m => StatusType -> m [Text]
+status :: (MonadFree GitF m) => StatusType -> m [Text]
 status sType = liftF $ Status (GStatusData sType) id
 
-log :: MonadFree GitF m => LogType -> Text -> Text -> m [Text]
+log :: (MonadFree GitF m) => LogType -> Text -> Text -> m [Text]
 log lType lBase lTarget = liftF $ Log (GLogData lType lBase lTarget) id
 
-stashList :: MonadFree GitF m => m [Text]
+stashList :: (MonadFree GitF m) => m [Text]
 stashList = liftF $ StashList GStashListData id
 
-currentBranch :: MonadFree GitF m => m (Maybe Text)
+currentBranch :: (MonadFree GitF m) => m (Maybe Text)
 currentBranch = liftF $ CurrentBranch GCurrentBranchData id
 
-branchUpstream :: MonadFree GitF m => Text -> m (Maybe Text)
+branchUpstream :: (MonadFree GitF m) => Text -> m (Maybe Text)
 branchUpstream bName = liftF $ BranchUpstream (GBranchUpstreamData bName) id
 
-readConfig :: MonadFree GitF m => ConfigScope -> Text -> m (Maybe Text)
+readConfig :: (MonadFree GitF m) => ConfigScope -> Text -> m (Maybe Text)
 readConfig cScope cName = liftF $ ReadConfig (GReadConfigData cScope cName) id
 
 -- TODO: Check if it's better or even possible to get all configurations and filter them ourself.
 -- This would improve testability of this, as now we rely on the fact that we make a correct cli call
 -- to find config with regex in the `Real.hs`.
-aliasesToRemove :: MonadFree GitF m => ConfigScope -> m (Maybe (NonEmpty Text))
+aliasesToRemove :: (MonadFree GitF m) => ConfigScope -> m (Maybe (NonEmpty Text))
 aliasesToRemove cScope = liftF $ AliasesToRemove (GAliasesToRemoveData cScope) id
 
-setConfig :: MonadFree GitF m => ConfigScope -> Text -> Text -> m ()
+setConfig :: (MonadFree GitF m) => ConfigScope -> Text -> Text -> m ()
 setConfig cScope cName cValue = liftF $ SetConfig (GSetConfigData cScope cName cValue) ()
 
-unsetConfig :: MonadFree GitF m => ConfigScope -> Text -> m ()
+unsetConfig :: (MonadFree GitF m) => ConfigScope -> Text -> m ()
 unsetConfig cScope cName = liftF $ UnsetConfig (GUnsetConfigData cScope cName) ()
 
-gpgListKeys :: MonadFree GitF m => Text -> m (Maybe (NonEmpty Text))
+gpgListKeys :: (MonadFree GitF m) => Text -> m (Maybe (NonEmpty Text))
 gpgListKeys gEmail = liftF $ GPGListKeys (GGPGKeyListData gEmail) id
 
-pathToTool :: MonadFree GitF m => Text -> m (Maybe Text)
+pathToTool :: (MonadFree GitF m) => Text -> m (Maybe Text)
 pathToTool toolName' = liftF $ PathToTool (GPathToToolData toolName') id
 
-promptDefault :: MonadFree GitF m => Text -> Maybe Text -> m Text
+promptDefault :: (MonadFree GitF m) => Text -> Maybe Text -> m Text
 promptDefault pText pDefault = liftF $ Prompt (PromptConfig pText (PromptDefault pDefault)) id
 
-promptOneTime :: MonadFree GitF m => Text -> m Text
+promptOneTime :: (MonadFree GitF m) => Text -> m Text
 promptOneTime pText = liftF $ Prompt (PromptConfig pText PromptOneTime) id
 
-formatInfo :: MonadFree GitF m => Text -> m Text
+formatInfo :: (MonadFree GitF m) => Text -> m Text
 formatInfo content = liftF $ FormatInfo content id
 
-formatCommand :: MonadFree GitF m => Text -> m Text
+formatTextRed :: (MonadFree GitF m) => Text -> m Text
+formatTextRed content = liftF $ FormatTextRed content id
+
+formatCommand :: (MonadFree GitF m) => Text -> m Text
 formatCommand cmd = liftF $ FormatCommand cmd id
 
-print :: MonadFree GitF m => Text -> m ()
-print content = liftF $ PrintText content ()
+print :: (MonadFree GitF m) => Text -> m ()
+print content = liftF $ PrintTextLn content ()
 
-initRepository :: MonadFree GitF m => m ()
+printNoLn :: (MonadFree GitF m) => Text -> m ()
+printNoLn content = liftF $ PrintText content ()
+
+initRepository :: (MonadFree GitF m) => m ()
 initRepository = liftF $ InitRepository GInitRepositoryData ()
 
-addInitialCommit :: MonadFree GitF m => Text -> m ()
+addInitialCommit :: (MonadFree GitF m) => Text -> m ()
 addInitialCommit cMessage = liftF $ AddInitialCommit (GInitialCommitData cMessage) ()
 
-show :: MonadFree GitF m => ShowTarget -> m [Text]
+cloneRepository :: (MonadFree GitF m) => NonEmpty Text -> m (Maybe ())
+cloneRepository opts = liftF $ CloneRepository (GCloneRepositoryData opts) id
+
+show :: (MonadFree GitF m) => ShowTarget -> m [Text]
 show sTarget = liftF $ Show (GShowData sTarget) id
+
+directoryExists :: (MonadFree GitF m) => Text -> m Bool
+directoryExists path = liftF $ DirectoryExists path id
+
+appendToCWD :: (MonadFree GitF m) => Text -> m ()
+appendToCWD path = liftF $ AppendToCWD path ()
+
+popFromCWD :: (MonadFree GitF m) => m ()
+popFromCWD = liftF $ PopFromCWD ()
 
 -- Derived actions
 
-emptyLine :: MonadFree GitF m => m ()
+emptyLine :: (MonadFree GitF m) => m ()
 emptyLine = print ""
 
 formatGitCommand :: (RenderGitCommand gc, MonadFree GitF m) => gc -> m Text
 formatGitCommand gc = formatCommand (renderGC gc)
 
-setConfigVerbose :: MonadFree GitF m => ConfigScope -> Text -> Text -> m ()
+setConfigVerbose :: (MonadFree GitF m) => ConfigScope -> Text -> Text -> m ()
 setConfigVerbose cScope cName cValue = do
-  setConfig cScope cName cValue
   print =<< formatGitCommand (GSetConfigData cScope cName cValue)
+  setConfig cScope cName cValue
 
-unsetConfigVerbose :: MonadFree GitF m => ConfigScope -> Text -> m ()
+unsetConfigVerbose :: (MonadFree GitF m) => ConfigScope -> Text -> m ()
 unsetConfigVerbose cScope cName = do
-  unsetConfig cScope cName
   print =<< formatGitCommand (GUnsetConfigData cScope cName)
+  unsetConfig cScope cName
 
-gpgListKeysVerbose :: MonadFree GitF m => Text -> m (Maybe (NonEmpty Text))
+gpgListKeysVerbose :: (MonadFree GitF m) => Text -> m (Maybe (NonEmpty Text))
 gpgListKeysVerbose gEmail = do
-  gpgKeys <- gpgListKeys gEmail
   print =<< formatGitCommand (GGPGKeyListData gEmail)
+  gpgKeys <- gpgListKeys gEmail
   return gpgKeys
 
-freshestDefaultBranch :: MonadFree GitF m => m Text
+freshestDefaultBranch :: (MonadFree GitF m) => m Text
 freshestDefaultBranch = do
   -- TODO: Port bash logic
-  return "main"
+  return "origin/main"
 
-isGitAcquired :: MonadFree GitF m => m Bool
+isGitAcquired :: (MonadFree GitF m) => m Bool
 isGitAcquired = do
   isJust <$> readConfig LocalConfig "elegant.acquired"
 
@@ -362,13 +393,13 @@ formatInfoBox content =
   contentLength = length content
   box = T.replicate (3 + contentLength + 3) "="
 
-removeAliases :: MonadFree GitF m => ConfigScope -> m ()
+removeAliases :: (MonadFree GitF m) => ConfigScope -> m ()
 removeAliases cScope = do
   whenJustM (aliasesToRemove cScope) $ \aliases -> do
     print =<< formatInfo "Removing old Elegant Git aliases..."
     mapM_ (unsetConfigVerbose cScope) aliases
 
-removeObsoleteConfiguration :: MonadFree GitF m => ConfigScope -> m ()
+removeObsoleteConfiguration :: (MonadFree GitF m) => ConfigScope -> m ()
 removeObsoleteConfiguration cScope = do
   print =<< formatInfoBox "Removing obsolete configurations..."
   whenM isGitAcquired $ do
@@ -377,18 +408,30 @@ removeObsoleteConfiguration cScope = do
 
   removeAliases cScope
 
-initRepositoryVerbose :: MonadFree GitF m => m ()
+initRepositoryVerbose :: (MonadFree GitF m) => m ()
 initRepositoryVerbose = do
-  initRepository
   print =<< formatGitCommand GInitRepositoryData
+  initRepository
 
-addInitialCommitVerbose :: MonadFree GitF m => Text -> m ()
+addInitialCommitVerbose :: (MonadFree GitF m) => Text -> m ()
 addInitialCommitVerbose cMessage = do
-  addInitialCommit cMessage
   print =<< formatGitCommand (GInitialCommitData cMessage)
+  addInitialCommit cMessage
 
-showVerbose :: MonadFree GitF m => ShowTarget -> m [Text]
+showVerbose :: (MonadFree GitF m) => ShowTarget -> m [Text]
 showVerbose sTarget = do
-  output <- show sTarget
   print =<< formatGitCommand (GShowData sTarget)
+  output <- show sTarget
   return output
+
+cloneRepositoryVerbose :: (MonadFree GitF m) => NonEmpty Text -> m (Maybe ())
+cloneRepositoryVerbose opts = do
+  print =<< formatGitCommand (GCloneRepositoryData opts)
+  cloneRepository opts
+
+withCWD :: (MonadFree GitF m) => Text -> m a -> m a
+withCWD path action = do
+  appendToCWD path
+  result <- action
+  popFromCWD
+  return result

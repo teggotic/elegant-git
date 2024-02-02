@@ -22,6 +22,8 @@ description:          Elegant Git is an assistant who carefully automates routin
 dependencies:
 - base >= 4.7 && < 5
 
+- filepath
+- directory
 - universum
 - string-qq
 - exceptions
@@ -39,6 +41,8 @@ dependencies:
 - microlens-th
 - utility-ht
 - unliftio
+- network-uri
+- modern-uri
 
 - optparse-applicative
 - typed-process

@@ -1,7 +1,10 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Elegit.Git.Exec where
 
@@ -10,10 +13,11 @@ import qualified Data.Text as T
 import Data.Text.Lazy (stripEnd)
 import Elegit.Git.Action
 import GHC.IO.Handle (hFlush, hFlushAll)
+import System.Directory (setCurrentDirectory)
 import System.IO.Error (IOError)
 import System.Process.Typed (ExitCode (ExitSuccess), ProcessConfig, proc, readProcess, shell)
 import Universum as U
-import UnliftIO.Directory (makeRelativeToCurrentDirectory, removeFile)
+import UnliftIO.Directory (doesDirectoryExist, getCurrentDirectory, makeRelativeToCurrentDirectory, removeFile)
 
 procCmd :: Text -> [Text] -> ProcessConfig () () ()
 procCmd tName args = proc (toString tName) (toString <$> args)
@@ -25,11 +29,11 @@ class ExecutableCommand a where
   type ExecutableCommandResult a :: Type
 
   cmdExecArgs :: a -> [Text]
-  default cmdExecArgs :: RenderGitCommand a => a -> [Text]
+  default cmdExecArgs :: (RenderGitCommand a) => a -> [Text]
   cmdExecArgs = commandArgs
 
   cmdExecToolName :: a -> Text
-  default cmdExecToolName :: RenderGitCommand a => a -> Text
+  default cmdExecToolName :: (RenderGitCommand a) => a -> Text
   cmdExecToolName = toolName
 
   toProc :: a -> Text -> [Text] -> ProcessConfig () () ()
@@ -136,6 +140,14 @@ instance ExecutableCommand GInitRepositoryData where
   readGitOutput _ (ExitSuccess, _, _) = pass
   readGitOutput _ _ = Nothing
 
+instance ExecutableCommand GCloneRepositoryData where
+  type ExecutableCommandResult GCloneRepositoryData = Maybe ()
+
+  toProc _ = shellCmd
+
+  readGitOutput _ (ExitSuccess, _, _) = pass
+  readGitOutput _ _ = Nothing
+
 instance ExecutableCommand GInitialCommitData where
   type ExecutableCommandResult GInitialCommitData = Maybe ()
 
@@ -153,12 +165,14 @@ instance ExecutableCommand GShowData where
   readGitOutput _ (ExitSuccess, gOut, _) = pure $ lines (toStrict gOut)
   readGitOutput _ _ = Nothing
 
-class Monad m => MonadGitExec m where
+class (Monad m) => MonadGitExec m where
   execGit :: (ExecutableCommand a) => a -> m (ExecutableCommandResult a)
   pText :: Text -> m ()
   pTextLn :: Text -> m ()
   gLine :: m Text
   withFileWithText :: Text -> Text -> m () -> m ()
+  directoryExists :: FilePath -> m Bool
+  setCWD :: FilePath -> m ()
 
 newtype GitExecT m a = GitExecT {runGitExecT :: m a}
 
@@ -204,6 +218,13 @@ instance (MonadMask m, MonadIO m) => MonadGitExec (GitExecT m) where
 
   gLine = getLine
 
+  directoryExists path =
+    doesDirectoryExist path
+
+  setCWD path = do
+    liftIO $ setCurrentDirectory path
+    U.print =<< getCurrentDirectory
+
 {- This is the boilerplate required by mtl to define custom monad transformer
  - Theoretically, mtl is the fastest library. However, it's too generic which results
  - in a huge amount of boilerplate, which is not ideal. This is also, not a full list type-classes
@@ -223,17 +244,17 @@ mapReaderT :: (m a -> n b) -> GitExecT m a -> GitExecT n b
 mapReaderT f m = GitExecT $ f $ runGitExecT m
 {-# INLINE mapReaderT #-}
 
-instance Functor m => Functor (GitExecT m) where
+instance (Functor m) => Functor (GitExecT m) where
   fmap f = mapReaderT (fmap f)
   {-# INLINE fmap #-}
 
-instance Applicative m => Applicative (GitExecT m) where
+instance (Applicative m) => Applicative (GitExecT m) where
   pure = liftGitExecT . pure
   {-# INLINE pure #-}
   f <*> v = GitExecT $ runGitExecT f <*> runGitExecT v
   {-# INLINE (<*>) #-}
 
-instance Monad m => Monad (GitExecT m) where
+instance (Monad m) => Monad (GitExecT m) where
   return = pure
   {-# INLINE return #-}
   m >>= f = GitExecT $ do
@@ -245,15 +266,15 @@ instance MonadTrans GitExecT where
   lift = liftGitExecT
   {-# INLINE lift #-}
 
-instance MonadThrow m => MonadThrow (GitExecT m) where
+instance (MonadThrow m) => MonadThrow (GitExecT m) where
   throwM e = lift $ MC.throwM e
   {-# INLINE throwM #-}
 
-instance MonadCatch m => MonadCatch (GitExecT m) where
+instance (MonadCatch m) => MonadCatch (GitExecT m) where
   catch (GitExecT m) c = GitExecT $ m `MC.catch` \e -> runGitExecT (c e)
   {-# INLINE catch #-}
 
-instance MonadMask m => MonadMask (GitExecT m) where
+instance (MonadMask m) => MonadMask (GitExecT m) where
   mask a = GitExecT $ mask $ \u -> runGitExecT (a $ q u)
    where
     q :: (m a -> m a) -> GitExecT m a -> GitExecT m a
@@ -274,3 +295,8 @@ instance MonadMask m => MonadMask (GitExecT m) where
 instance (MonadIO m) => MonadIO (GitExecT m) where
   liftIO = liftGitExecT . liftIO
   {-# INLINE liftIO #-}
+
+instance (MonadState s m) => MonadState s (GitExecT m) where
+  get = lift get
+  put = lift . put
+  state = lift . state

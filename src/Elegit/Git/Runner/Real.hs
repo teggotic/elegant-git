@@ -1,19 +1,45 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Elegit.Git.Runner.Real where
 
 import Control.Monad.Free.Church
 import Control.Monad.HT (until)
+import Data.List.NonEmpty as NE (append, singleton, take)
 import qualified Elegit.Git.Action as GA
-import Elegit.Git.Exec (MonadGitExec (execGit, gLine, pText, pTextLn, withFileWithText))
+import Elegit.Git.Exec (MonadGitExec (directoryExists, execGit, gLine, pText, pTextLn, setCWD, withFileWithText))
 import Fmt
-import Universum as U hiding (withFile)
+import Lens.Micro.Mtl
+import Lens.Micro.TH (makeLenses)
+import System.FilePath (joinPath)
+import Universum as U hiding (use, withFile)
+
+data ExecState = ExecState
+  { _esCwd :: NonEmpty Text
+  }
+
+makeLenses ''ExecState
 
 -- | Execute the action in the real world.
-executeGit :: (MonadGitExec m) => GA.FreeGit () -> m ()
+executeGit :: (MonadGitExec m, MonadState ExecState m) => GA.FreeGit () -> m ()
 executeGit = foldF executeGitF
 
 -- | Interpreter for the real world
-executeGitF :: (MonadGitExec m) => GA.GitF a -> m a
+executeGitF :: (MonadGitExec m, MonadState ExecState m) => GA.GitF a -> m a
 executeGitF arg = case arg of
+  GA.CloneRepository gc next -> do
+    next <$> execGit gc
+  GA.AppendToCWD path next -> do
+    -- esCwd %= (`append` singleton path)
+    use esCwd
+      >>= setCWD . joinPath . fmap toString . toList
+    return next
+  GA.PopFromCWD next -> do
+    -- esCwd %= (\cwd -> fromList $ NE.take (if length cwd > 1 then length cwd else 0) cwd)
+    use esCwd
+      >>= setCWD . joinPath . fmap toString . toList
+    return next
+  GA.DirectoryExists path next -> do
+    next <$> directoryExists (toString path)
   GA.InitRepository gc next -> do
     void $ execGit gc
     return next
@@ -79,9 +105,14 @@ executeGitF arg = case arg of
     return $ next answer
   GA.FormatInfo content next -> do
     return $ next $ colored Green Normal content
+  GA.FormatTextRed content next -> do
+    return $ next $ colored Cyan Bold content
   GA.FormatCommand content next -> do
     return $ next $ colored Green Normal "==>>" <> " " <> colored Blue Bold content
   GA.PrintText content next -> do
+    pText content
+    return next
+  GA.PrintTextLn content next -> do
     pTextLn content
     return next
 
@@ -90,14 +121,18 @@ colored color style content =
   fmt "\x1b[" +|| fontStyleCode style ||+ ";" +|| colorCode color ||+ "m" +| content |+ "\x1b[0m"
 
 data Color
-  = Green
+  = Red
+  | Green
   | Blue
   | Purple
+  | Cyan
 
 colorCode :: Color -> Int
+colorCode Red = 31
 colorCode Green = 32
 colorCode Blue = 34
 colorCode Purple = 35
+colorCode Cyan = 36
 
 data FontStyle
   = Normal

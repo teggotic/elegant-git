@@ -1,6 +1,7 @@
 module Elegit.Cli.Parser where
 
 import qualified Elegit.Cli.Action.AcquireRepository as AcquireRepository
+import qualified Elegit.Cli.Action.CloneRepository as CloneRepository
 import qualified Elegit.Cli.Action.InitRepository as InitRepository
 import qualified Elegit.Cli.Action.ShowWork as ShowWork
 import Elegit.Cli.Command
@@ -19,6 +20,7 @@ enableElegantGitServices =
   commandGroup "enable Elegant Git services"
     <> AcquireRepository.cli
     <> InitRepository.cli
+    <> CloneRepository.cli
 
 cli :: ParserInfo ElegitCommand
 cli =

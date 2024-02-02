@@ -56,7 +56,9 @@ cmd = do
     stashes <- GA.stashList
 
     GA.print =<< GA.formatInfo ">>> Branch refs:"
-    GA.print =<< GA.formatInfo (fmt "local: " +| currentBranch |+ "")
+    GA.printNoLn =<< GA.formatInfo ("local:  ")
+    GA.print =<< GA.formatTextRed currentBranch
+
     whenJust mCurrentUpstream $ \currentUpstream ->
       GA.print =<< GA.formatInfo (fmt "remote: " +| currentUpstream |+ "")
 

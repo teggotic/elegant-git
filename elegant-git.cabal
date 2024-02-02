@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       Elegit.Cli.Action.AcquireRepository
+      Elegit.Cli.Action.CloneRepository
       Elegit.Cli.Action.InitRepository
       Elegit.Cli.Action.ShowWork
       Elegit.Cli.Command
@@ -48,14 +49,18 @@ library
   build-depends:
       base >=4.7 && <5
     , containers
+    , directory
     , dlist
     , exceptions
+    , filepath
     , fmt
     , free
     , microlens
     , microlens-mtl
     , microlens-th
+    , modern-uri
     , mtl
+    , network-uri
     , optparse-applicative
     , safe-exceptions
     , string-qq
@@ -83,15 +88,19 @@ executable git-elegant
   build-depends:
       base >=4.7 && <5
     , containers
+    , directory
     , dlist
     , elegant-git
     , exceptions
+    , filepath
     , fmt
     , free
     , microlens
     , microlens-mtl
     , microlens-th
+    , modern-uri
     , mtl
+    , network-uri
     , optparse-applicative
     , safe-exceptions
     , string-qq
@@ -109,9 +118,11 @@ test-suite elegant-git-test
   main-is: Spec.hs
   other-modules:
       Elegit.Cli.Action.AcquireRepositorySpec
+      Elegit.Cli.Action.CloneRepositorySpec
       Elegit.Cli.Action.InitRepositorySpec
       Elegit.Cli.Action.ShowWorkSpec
       Elegit.Cli.Parser.AcquireRepositorySpec
+      Elegit.Cli.Parser.CloneRepositorySpec
       Elegit.Cli.Parser.InitRepositorySpec
       Elegit.Cli.Parser.ShowWorkSpec
       Elegit.Cli.Parser.Util
@@ -128,16 +139,20 @@ test-suite elegant-git-test
   build-depends:
       base >=4.7 && <5
     , containers
+    , directory
     , dlist
     , elegant-git
     , exceptions
+    , filepath
     , fmt
     , free
     , hspec
     , microlens
     , microlens-mtl
     , microlens-th
+    , modern-uri
     , mtl
+    , network-uri
     , optparse-applicative
     , safe-exceptions
     , string-qq

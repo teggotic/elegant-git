@@ -32,8 +32,11 @@ MESSAGE
 default(){
     source ${BINS}/plugins/configuration-default-branches
     local branch=$(git rev-parse --abbrev-ref @)
+    # local tttt=$()
     info-text ">>> Branch refs:"
-    info-text "local:  ${branch}"
+    --colored-line ${TEXT_FORMAT_NORMAL} ${TEXT_COLOR_GREEN} "local:  "
+    --colored-line ${TEXT_FORMAT_BOLD} ${TEXT_COLOR_RED} "${branch}"
+    echo
     local upstream=$(git rev-parse --abbrev-ref ${branch}@{upstream} 2>/dev/null || echo)
     if [[ -n ${upstream} ]]; then
         info-text "remote: ${upstream}"

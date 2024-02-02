@@ -137,6 +137,18 @@ runGitActionPure imGit action =
 -- `Writer`. To lift any value into a monad you should use `return`.
 collectImpureCommandsF :: (MonadState InMemoryGit m, MonadWriter (DList GitCommand) m) => GA.GitF a -> m a
 collectImpureCommandsF cmd = case cmd of
+  GA.CloneRepository _ next -> do
+    gRepository .= Just newRepository
+    return (next $ Just ())
+  GA.AppendToCWD _path next -> do
+    -- TODO: Simulate CWD, maybe?
+    return next
+  GA.PopFromCWD next -> do
+    -- TODO: Simulate CWD, maybe?
+    return next
+  GA.DirectoryExists _path next -> do
+    -- TODO: Simulate CWD, maybe?
+    return $ next True
   GA.InitRepository _ next -> do
     gRepository .= Just newRepository
     return next
@@ -267,6 +279,7 @@ collectImpureCommandsF cmd = case cmd of
         then singleton $ PrintText ""
         else DList.fromList (PrintText <$> lines content)
     return next
+  _ -> error ""
 
 localRepository :: Traversal' InMemoryGit GRepository
 localRepository = gRepository . _Just
